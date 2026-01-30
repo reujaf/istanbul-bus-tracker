@@ -776,17 +776,30 @@ async function getVehiclesByRoute(hatKodu) {
       .replace(/&amp;/g, '&');
     
     const vehicles = JSON.parse(jsonStr);
-    return vehicles.map(v => ({
-      lat: parseFloat(v.enlem),
-      lng: parseFloat(v.boylam),
-      kapiNo: v.kapino,
-      hatKodu: v.hatkodu,
-      hatAdi: v.hatad,
-      yon: v.yon,
-      speed: parseFloat(v.hiz) || 0,
-      operator: v.operator,
-      plaka: v.plession
-    })).filter(v => !isNaN(v.lat) && !isNaN(v.lng));
+    const mapped = vehicles.map(v => {
+      // API'den gelen field isimlerini kontrol et (küçük/büyük harf farklılıkları)
+      const hatKoduFromAPI = v.hatkodu || v.HatKodu || v.HatKodu || v.hatKodu;
+      return {
+        lat: parseFloat(v.enlem || v.Enlem),
+        lng: parseFloat(v.boylam || v.Boylam),
+        kapiNo: v.kapino || v.KapiNo || v.kapiNo,
+        hatKodu: hatKoduFromAPI || hatKodu, // API'den gelen veya parametre olarak gelen
+        hatAdi: v.hatad || v.HatAdi || v.hatAdi,
+        yon: v.yon || v.Yon,
+        speed: parseFloat(v.hiz || v.Hiz) || 0,
+        operator: v.operator || v.Operator,
+        plaka: v.plession || v.Plaka || v.plaka
+      };
+    }).filter(v => !isNaN(v.lat) && !isNaN(v.lng));
+    
+    // Debug: İlk aracın field'larını logla
+    if (mapped.length > 0) {
+      const first = vehicles[0];
+      console.log(`[DEBUG] API'den gelen ilk araç field'ları:`, Object.keys(first));
+      console.log(`[DEBUG] hatKodu mapping: ${first.hatkodu || first.HatKodu || 'YOK'} -> ${mapped[0].hatKodu}`);
+    }
+    
+    return mapped;
   } catch (error) {
     return [];
   }
@@ -837,7 +850,9 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
         const route = routesToQuery[idx];
         vehicles.forEach(v => {
           v.routeId = route.route_id;
-          v.routeShortName = route.route_short_name;
+          // Eğer API'den hatKodu gelmediyse, GTFS route bilgisini kullan
+          v.hatKodu = v.hatKodu || route.route_short_name;
+          v.routeShortName = route.route_short_name; // Her zaman GTFS route bilgisini kullan
           v.routeLongName = route.route_long_name;
           v.routeColor = route.route_color || '053e73';
         });
@@ -920,24 +935,25 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
       // Yön açısını hesapla (araçtan durağa)
       const heading = calculateHeading(vehicle.lat, vehicle.lng, targetLat, targetLng);
       
-      // Hat bilgisi araçtan geliyorsa kullan (hat bazlı sorguda mevcut)
-      const hasHatKodu = !!(vehicle.hatKodu || vehicle.routeShortName);
-      const hatKodu = vehicle.hatKodu || vehicle.routeShortName || vehicle.kapiNo;
-      const hatAdi = vehicle.hatAdi || vehicle.routeLongName || formatOperatorName(vehicle.operator);
+      // Hat bilgisi öncelik sırası: routeShortName (GTFS) > API'den gelen hatKodu > kapiNo
+      // routeShortName her zaman GTFS'ten geliyor, bu yüzden öncelikli
+      const hasHatKodu = !!(vehicle.routeShortName && vehicle.routeShortName !== vehicle.kapiNo);
+      const displayName = vehicle.routeShortName || vehicle.hatKodu || vehicle.kapiNo;
+      const hatAdi = vehicle.routeLongName || vehicle.hatAdi || formatOperatorName(vehicle.operator);
       const yon = vehicle.yon || '';
       
       return {
-        routeId: vehicle.routeId || hatKodu,
-        routeShortName: hatKodu, // Hat kodu: 500T, 133F vs
+        routeId: vehicle.routeId || vehicle.routeShortName || vehicle.kapiNo,
+        routeShortName: displayName, // Hat kodu: 500T, 133F vs (GTFS route veya API hatKodu)
         routeLongName: hatAdi,
-        kapiNo: vehicle.kapiNo,
+        kapiNo: vehicle.kapiNo, // Kapı numarası her zaman ayrı göster
         operator: formatOperatorName(vehicle.operator),
-        routeColor: vehicle.routeColor || getRouteColor(hatKodu),
+        routeColor: vehicle.routeColor || getRouteColor(displayName),
         minutesUntilArrival: estimatedMinutes,
         arrivalTime: arrivalTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
         destination: yon || hatAdi?.split('-').pop()?.trim() || '',
         isLive: true,
-        hasHatKodu: hasHatKodu,
+        hasHatKodu: hasHatKodu, // GTFS route bilgisi varsa true
         vehicleId: vehicle.plaka || vehicle.kapiNo,
         location: { lat: vehicle.lat, lng: vehicle.lng },
         heading: heading,

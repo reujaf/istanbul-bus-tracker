@@ -848,7 +848,6 @@ export default function App() {
                         style={{ background: `linear-gradient(135deg, #${bus.routeColor || '053e73'} 0%, #${bus.routeColor || '053e73'}cc 100%)` }}
                       >
                         <Bus className="w-5 h-5" />
-                        {bus.kapiNo && <span className="text-[8px] opacity-80 mt-0.5">{bus.kapiNo}</span>}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-700 truncate">{bus.routeShortName}</p>
