@@ -760,14 +760,20 @@ async function getVehiclesByRoute(hatKodu) {
       },
       body: soapBody,
       agent: httpsAgent,
-      timeout: 8000
+      timeout: 10000
     });
     
-    if (!response.ok) return [];
+    if (!response.ok) {
+      console.log(`[DEBUG] Hat ${hatKodu} için API hatası: HTTP ${response.status}`);
+      return [];
+    }
     
     const xmlText = await response.text();
     const jsonMatch = xmlText.match(/<GetHatOtoKonum_jsonResult>([\s\S]*?)<\/GetHatOtoKonum_jsonResult>/);
-    if (!jsonMatch) return [];
+    if (!jsonMatch) {
+      console.log(`[DEBUG] Hat ${hatKodu} için JSON bulunamadı`);
+      return [];
+    }
     
     let jsonStr = jsonMatch[1]
       .replace(/&quot;/g, '"')
@@ -865,15 +871,45 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
     // Eğer hat bazlı sorgudan sonuç gelmezse genel filo sorgusuna düş
     if (allVehicles.length === 0) {
       console.log('Hat bazlı sorgu boş, genel filo sorgulanıyor...');
-      const realtimeVehicles = await getRealtimeBusLocations();
-      allVehicles = realtimeVehicles;
+      try {
+        const realtimeVehicles = await getRealtimeBusLocations();
+        allVehicles = realtimeVehicles;
+      } catch (error) {
+        console.log('Genel filo API hatası:', error.message);
+        // Gerçek zamanlı veri yoksa boş döndür
+        const stopRoutesResponse = stopRoutes.map(r => ({
+          route_id: r.route_id,
+          route_short_name: r.route_short_name,
+          route_long_name: r.route_long_name,
+          route_color: r.route_color || '053e73'
+        }));
+        return res.json({ 
+          success: true, 
+          stopId, 
+          arrivals: [], 
+          stopRoutes: stopRoutesResponse,
+          count: 0,
+          message: 'Canlı veriye ulaşılamadı'
+        });
+      }
     }
     
     if (allVehicles.length === 0) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'Canlı veriye ulaşılamadı. Lütfen daha sonra tekrar deneyin.',
-        code: 'LIVE_DATA_UNAVAILABLE'
+      // Gerçek zamanlı veri yoksa boş döndür
+      console.log('Canlı veri bulunamadı');
+      const stopRoutesResponse = stopRoutes.map(r => ({
+        route_id: r.route_id,
+        route_short_name: r.route_short_name,
+        route_long_name: r.route_long_name,
+        route_color: r.route_color || '053e73'
+      }));
+      return res.json({ 
+        success: true, 
+        stopId, 
+        arrivals: [], 
+        stopRoutes: stopRoutesResponse,
+        count: 0,
+        message: 'Yaklaşan otobüs bulunamadı'
       });
     }
     
@@ -1044,77 +1080,6 @@ function calculateHeading(fromLat, fromLng, toLat, toLng) {
   
   let heading = Math.atan2(y, x) * 180 / Math.PI;
   return (heading + 360) % 360;
-}
-
-// GTFS tabanlı tahmin (gerçek zamanlı veri yoksa)
-async function sendGTFSEstimates(res, stopId, targetLat, targetLng, gtfsCache) {
-  if (!gtfsCache.routes) {
-    return res.json({ 
-      success: true, 
-      stopId, 
-      arrivals: [], 
-      count: 0,
-      message: 'Canlı veri bulunamadı'
-    });
-  }
-  
-  // Bu durağa gelen hatları bul
-  const routeIds = gtfsCache.stopRoutes[stopId] || [];
-  
-  if (routeIds.length === 0) {
-    return res.json({ 
-      success: true, 
-      stopId, 
-      arrivals: [], 
-      count: 0,
-      message: 'Bu durak için hat bilgisi bulunamadı'
-    });
-  }
-  
-  // Route bilgilerini al
-  const stopRoutes = gtfsCache.routes.filter(r => routeIds.includes(r.route_id));
-  
-  // Aynı hat adı olanları birleştir
-  const uniqueRoutes = [];
-  const seenNames = new Set();
-  for (const route of stopRoutes) {
-    if (!seenNames.has(route.route_short_name)) {
-      seenNames.add(route.route_short_name);
-      uniqueRoutes.push(route);
-    }
-  }
-  
-  const now = new Date();
-  
-  // Her hat için tahmini varış oluştur (max 6 hat göster)
-  const arrivals = uniqueRoutes.slice(0, 6).map((route, idx) => {
-    const minutesUntilArrival = Math.floor(Math.random() * 5) + 1 + (idx * 4);
-    const arrivalTime = new Date(now.getTime() + minutesUntilArrival * 60000);
-    
-    // Tahminli konum
-    const distanceMeters = minutesUntilArrival * 80;
-    const angle = (idx * 60 + Math.random() * 20) * (Math.PI / 180);
-    
-    const latOffset = (distanceMeters / 111320) * Math.cos(angle);
-    const lngOffset = (distanceMeters / (111320 * Math.cos(targetLat * Math.PI / 180))) * Math.sin(angle);
-    
-    return {
-      routeId: route.route_id,
-      routeShortName: route.route_short_name,
-      routeLongName: route.route_long_name,
-      routeColor: route.route_color || '053e73',
-      minutesUntilArrival,
-      arrivalTime: arrivalTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-      destination: route.route_long_name?.split('-').pop()?.trim() || 'Merkez',
-      isLive: false, // Tahminli veri
-      vehicleId: `34 ${route.route_short_name} ${Math.floor(Math.random() * 900) + 100}`,
-      location: { lat: targetLat + latOffset, lng: targetLng + lngOffset },
-      heading: (angle * 180 / Math.PI + 180) % 360
-    };
-  }).sort((a, b) => a.minutesUntilArrival - b.minutesUntilArrival);
-  
-  console.log(`${arrivals.length} TAHMİNİ otobüs gönderiliyor`);
-  res.json({ success: true, stopId, arrivals, count: arrivals.length, isRealtime: false });
 }
 
 // Routes CSV parser - TÜM HATLARI YÜKLE
