@@ -740,6 +740,58 @@ function parseStopTimesForRoutesAndTrips(csv, trips) {
   return { stopRoutes, tripStops };
 }
 
+// Belirli bir hat için araç konumlarını getir (hat kodu ile)
+async function getVehiclesByRoute(hatKodu) {
+  try {
+    const soapBody = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+  <soap:Body>
+    <tem:GetHatOtoKonum_json>
+      <tem:HatKodu>${hatKodu}</tem:HatKodu>
+    </tem:GetHatOtoKonum_json>
+  </soap:Body>
+</soap:Envelope>`;
+
+    const response = await fetch('https://api.ibb.gov.tr/iett/FiloDurum/SeferGerceklesme.asmx', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': 'http://tempuri.org/GetHatOtoKonum_json'
+      },
+      body: soapBody,
+      agent: httpsAgent,
+      timeout: 8000
+    });
+    
+    if (!response.ok) return [];
+    
+    const xmlText = await response.text();
+    const jsonMatch = xmlText.match(/<GetHatOtoKonum_jsonResult>([\s\S]*?)<\/GetHatOtoKonum_jsonResult>/);
+    if (!jsonMatch) return [];
+    
+    let jsonStr = jsonMatch[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    
+    const vehicles = JSON.parse(jsonStr);
+    return vehicles.map(v => ({
+      lat: parseFloat(v.enlem),
+      lng: parseFloat(v.boylam),
+      kapiNo: v.kapino,
+      hatKodu: v.hatkodu,
+      hatAdi: v.hatad,
+      yon: v.yon,
+      speed: parseFloat(v.hiz) || 0,
+      operator: v.operator,
+      plaka: v.plession
+    })).filter(v => !isNaN(v.lat) && !isNaN(v.lng));
+  } catch (error) {
+    return [];
+  }
+}
+
 // Durağa yaklaşan otobüsler endpoint'i (GERÇEK ZAMANLI KONUM + HAT KODU)
 app.get('/api/arrivals/:stopId', async (req, res) => {
   try {
@@ -750,19 +802,59 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
     const targetLat = parseFloat(stopLat) || 41.0082;
     const targetLng = parseFloat(stopLng) || 28.9784;
     
-    // GTFS verilerini yükle (güzergah çizimi için gerekli) - paralel yükle
-    const [gtfsLoaded, realtimeVehicles] = await Promise.all([
-      loadGTFSData().catch(err => {
-        console.error('GTFS yükleme hatası:', err.message);
-        return false;
-      }),
-      getRealtimeBusLocations()
-    ]);
+    // GTFS verilerini yükle
+    const gtfsLoaded = await loadGTFSData().catch(err => {
+      console.error('GTFS yükleme hatası:', err.message);
+      return false;
+    });
     
-    // Hat mapping geçici olarak devre dışı (rate limit sorunu çözülünce aktif et)
-    // updateHatMapping().catch(err => console.error('Hat mapping hatası:', err.message));
+    // Bu durağa gelen hatları bul
+    let stopRouteIds = [];
+    let stopRoutes = [];
     
-    if (realtimeVehicles.length === 0) {
+    if (gtfsLoaded && gtfsCache.stopRoutes && gtfsCache.routes) {
+      stopRouteIds = gtfsCache.stopRoutes[stopId] || [];
+      stopRoutes = gtfsCache.routes
+        .filter(r => stopRouteIds.includes(r.route_id))
+        .slice(0, 10);
+      console.log(`Durak ${stopId} için ${stopRoutes.length} hat bulundu`);
+    }
+    
+    // Hat bazlı araç sorgusu yap (max 6 hat - rate limit için)
+    const routesToQuery = stopRoutes.slice(0, 6);
+    let allVehicles = [];
+    
+    if (routesToQuery.length > 0) {
+      console.log(`Hat bazlı sorgu yapılıyor: ${routesToQuery.map(r => r.route_short_name).join(', ')}`);
+      
+      // Paralel sorgula (daha hızlı)
+      const vehiclePromises = routesToQuery.map(route => 
+        getVehiclesByRoute(route.route_short_name)
+      );
+      
+      const results = await Promise.all(vehiclePromises);
+      results.forEach((vehicles, idx) => {
+        const route = routesToQuery[idx];
+        vehicles.forEach(v => {
+          v.routeId = route.route_id;
+          v.routeShortName = route.route_short_name;
+          v.routeLongName = route.route_long_name;
+          v.routeColor = route.route_color || '053e73';
+        });
+        allVehicles = allVehicles.concat(vehicles);
+      });
+      
+      console.log(`Hat bazlı sorgudan ${allVehicles.length} araç bulundu`);
+    }
+    
+    // Eğer hat bazlı sorgudan sonuç gelmezse genel filo sorgusuna düş
+    if (allVehicles.length === 0) {
+      console.log('Hat bazlı sorgu boş, genel filo sorgulanıyor...');
+      const realtimeVehicles = await getRealtimeBusLocations();
+      allVehicles = realtimeVehicles;
+    }
+    
+    if (allVehicles.length === 0) {
       return res.status(503).json({ 
         success: false, 
         error: 'Canlı veriye ulaşılamadı. Lütfen daha sonra tekrar deneyin.',
@@ -772,7 +864,7 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
     
     // Durağa yakın araçları bul (2000 metre yarıçap)
     const searchRadius = 2000;
-    const allNearbyVehicles = realtimeVehicles.filter(v => {
+    const allNearbyVehicles = allVehicles.filter(v => {
       const distance = haversineDistance(targetLat, targetLng, v.lat, v.lng);
       v.distance = distance;
       return distance <= searchRadius;
@@ -786,13 +878,8 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
       // Durmuş araçlar (hız = 0) ve uzakta - muhtemelen park, gösterme
       if (v.speed === 0 && v.distance > 100) return false;
       
-      // Hareket halindeki araçlar için yön kontrolü yap
-      // Aracın durağa doğru mu yoksa uzaklaşıyor mu kontrol et
-      const headingToStop = calculateHeading(v.lat, v.lng, targetLat, targetLng);
-      
-      // Eğer aracın önceki konumunu bilmiyorsak, mesafeye göre karar ver
-      // Sadece 1km'den yakın ve hareket halindeki araçları göster
-      if (v.distance <= 1000 && v.speed > 0) return true;
+      // Sadece 1.5km'den yakın araçları göster
+      if (v.distance <= 1500) return true;
       
       // Uzaktaki araçları gösterme
       return false;
@@ -800,11 +887,20 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
     
     console.log(`${allNearbyVehicles.length} araç ${searchRadius}m yarıçapta, ${nearbyVehicles.length} tanesi yaklaşıyor`);
     
+    // StopRoutes'u response için hazırla
+    const stopRoutesResponse = stopRoutes.map(r => ({
+      route_id: r.route_id,
+      route_short_name: r.route_short_name,
+      route_long_name: r.route_long_name,
+      route_color: r.route_color || '053e73'
+    }));
+    
     if (nearbyVehicles.length === 0) {
       return res.json({ 
         success: true, 
         stopId, 
         arrivals: [], 
+        stopRoutes: stopRoutesResponse,
         count: 0,
         message: 'Yaklaşan otobüs bulunamadı'
       });
@@ -812,7 +908,7 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
     
     const now = new Date();
     
-    // Araçları arrivals olarak döndür - hat kodu eşleştirmesiyle
+    // Araçları arrivals olarak döndür
     const arrivals = nearbyVehicles.slice(0, 10).map((vehicle, idx) => {
       // Tahmini varış süresi: mesafe / ortalama hız (20 km/h şehir içi)
       const avgSpeed = 20;
@@ -824,59 +920,37 @@ app.get('/api/arrivals/:stopId', async (req, res) => {
       // Yön açısını hesapla (araçtan durağa)
       const heading = calculateHeading(vehicle.lat, vehicle.lng, targetLat, targetLng);
       
-      // Hat bilgisini mapping'den al
-      const hatInfo = hatMappingCache.mapping[vehicle.kapiNo];
-      
-      // Operatör ve garaj bilgisinden isim oluştur
-      const operatorName = formatOperatorName(vehicle.operator);
-      const garajName = formatGarajName(vehicle.garaj);
-      
-      // Hat kodu varsa kullan, yoksa kapı numarasını göster
-      const hatKodu = hatInfo?.hatKodu || vehicle.kapiNo;
-      const hatAdi = hatInfo?.hatAdi || `${operatorName} - ${garajName}`;
-      const yon = hatInfo?.yon || garajName;
+      // Hat bilgisi araçtan geliyorsa kullan (hat bazlı sorguda mevcut)
+      const hasHatKodu = !!(vehicle.hatKodu || vehicle.routeShortName);
+      const hatKodu = vehicle.hatKodu || vehicle.routeShortName || vehicle.kapiNo;
+      const hatAdi = vehicle.hatAdi || vehicle.routeLongName || formatOperatorName(vehicle.operator);
+      const yon = vehicle.yon || '';
       
       return {
-        routeId: hatKodu,
+        routeId: vehicle.routeId || hatKodu,
         routeShortName: hatKodu, // Hat kodu: 500T, 133F vs
         routeLongName: hatAdi,
-        kapiNo: vehicle.kapiNo, // Kapı numarası küçük yazıyla
-        operator: operatorName,
-        garaj: garajName,
-        routeColor: getRouteColor(hatKodu),
+        kapiNo: vehicle.kapiNo,
+        operator: formatOperatorName(vehicle.operator),
+        routeColor: vehicle.routeColor || getRouteColor(hatKodu),
         minutesUntilArrival: estimatedMinutes,
         arrivalTime: arrivalTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-        destination: yon,
+        destination: yon || hatAdi?.split('-').pop()?.trim() || '',
         isLive: true,
-        hasHatKodu: !!hatInfo, // Hat kodu bulundu mu?
+        hasHatKodu: hasHatKodu,
         vehicleId: vehicle.plaka || vehicle.kapiNo,
         location: { lat: vehicle.lat, lng: vehicle.lng },
         heading: heading,
         speed: vehicle.speed,
-        distance: Math.round(vehicle.distance),
-        lastUpdate: vehicle.lastUpdate
+        distance: Math.round(vehicle.distance)
       };
     }).sort((a, b) => a.minutesUntilArrival - b.minutesUntilArrival);
     
     const hatBulunan = arrivals.filter(a => a.hasHatKodu).length;
     console.log(`${arrivals.length} otobüs gönderiliyor (${hatBulunan} hat kodlu)`);
     
-    // Durağa ait GTFS route'larını da gönder (güzergah çizimi için)
-    let stopRoutes = [];
-    if (gtfsCache.routes && gtfsCache.stopRoutes) {
-      const stopRouteIds = gtfsCache.stopRoutes[stopId] || [];
-      stopRoutes = gtfsCache.routes
-        .filter(r => stopRouteIds.includes(r.route_id))
-        .slice(0, 10)
-        .map(r => ({
-          route_id: r.route_id,
-          route_short_name: r.route_short_name,
-          route_long_name: r.route_long_name,
-          route_color: r.route_color || '053e73'
-        }));
-    }
     
-    res.json({ success: true, stopId, arrivals, stopRoutes, count: arrivals.length, isRealtime: true });
+    res.json({ success: true, stopId, arrivals, stopRoutes: stopRoutesResponse, count: arrivals.length, isRealtime: true });
     
   } catch (error) {
     console.error('Arrivals API Error:', error.message);

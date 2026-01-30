@@ -742,7 +742,7 @@ export default function App() {
           {/* Durak sayısı bilgisi - Glassmorphism */}
           {!loading && userLocation && (
             <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-[1000]">
-              <div className="bg-white/70 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-2xl border border-white/50 flex items-center gap-4 min-w-[280px]">
+              <div className="rounded-2xl px-6 py-3 shadow-2xl flex items-center gap-4 min-w-[280px]" style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0.55) 100%)', backdropFilter: 'blur(40px) saturate(180%)', WebkitBackdropFilter: 'blur(40px) saturate(180%)', border: '1.5px solid rgba(255, 255, 255, 0.7)', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.8)' }}>
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${stops.length > 0 ? 'bg-green-500/20' : 'bg-orange-500/20'}`}>
                   <MapPin className={`w-5 h-5 ${stops.length > 0 ? 'text-green-600' : 'text-orange-600'}`} />
                 </div>
@@ -782,7 +782,7 @@ export default function App() {
 
         {/* 1. Stop Detail View */}
         {selectedStop && viewMode === 'map' && (
-          <div className="absolute bottom-6 left-4 right-4 rounded-[32px] p-5 shadow-2xl z-[600] animate-in slide-in-from-bottom duration-300" style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)', backdropFilter: 'blur(40px) saturate(180%)', WebkitBackdropFilter: 'blur(40px) saturate(180%)', border: '1px solid rgba(255, 255, 255, 0.6)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)' }}>
+          <div className="absolute bottom-6 left-4 right-4 rounded-[32px] p-5 shadow-2xl z-[600] animate-in slide-in-from-bottom duration-300" style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0.55) 100%)', backdropFilter: 'blur(50px) saturate(200%)', WebkitBackdropFilter: 'blur(50px) saturate(200%)', border: '1.5px solid rgba(255, 255, 255, 0.7)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.8)' }}>
             {/* Handle */}
             <div className="w-full flex justify-center mb-3">
               <div className="w-12 h-1.5 bg-gray-200 rounded-full"></div>
@@ -840,7 +840,7 @@ export default function App() {
                     <div 
                       key={idx} 
                       className="flex items-center gap-3 p-3 rounded-2xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]" 
-                      style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)', backdropFilter: 'blur(20px) saturate(150%)', WebkitBackdropFilter: 'blur(20px) saturate(150%)', border: '1px solid rgba(255, 255, 255, 0.5)' }}
+                      style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.5) 100%)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid rgba(255, 255, 255, 0.6)', boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.7)' }}
                       onClick={() => showSingleBusOnMap(bus)}
                     >
                       <div 
@@ -881,7 +881,7 @@ export default function App() {
 
         {/* 2. Route View */}
         {selectedStop && viewMode === 'directions' && (
-           <div className="absolute bottom-6 left-4 right-4 rounded-[32px] p-5 shadow-2xl z-[600] animate-in slide-in-from-bottom duration-300 max-h-[70vh] overflow-y-auto" style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)', backdropFilter: 'blur(40px) saturate(180%)', WebkitBackdropFilter: 'blur(40px) saturate(180%)', border: '1px solid rgba(255, 255, 255, 0.6)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)' }}>
+           <div className="absolute bottom-6 left-4 right-4 rounded-[32px] p-5 shadow-2xl z-[600] animate-in slide-in-from-bottom duration-300 max-h-[70vh] overflow-y-auto" style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0.55) 100%)', backdropFilter: 'blur(50px) saturate(200%)', WebkitBackdropFilter: 'blur(50px) saturate(200%)', border: '1.5px solid rgba(255, 255, 255, 0.7)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.8)' }}>
              <div className="w-full flex justify-center mb-2">
                 <div className="w-12 h-1.5 bg-gray-200 rounded-full"></div>
              </div>
@@ -998,7 +998,7 @@ export default function App() {
         {/* --- BOTTOM NAVIGATION BAR - Glassmorphism --- */}
         {!selectedStop && (
           <div className="absolute bottom-6 left-4 right-4 z-[500]">
-            <div className="bg-white/70 backdrop-blur-xl rounded-[28px] h-[72px] shadow-2xl border border-white/60 flex items-center justify-around px-6">
+            <div className="rounded-[28px] h-[72px] shadow-2xl flex items-center justify-around px-6" style={{ background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.5) 100%)', backdropFilter: 'blur(50px) saturate(200%)', WebkitBackdropFilter: 'blur(50px) saturate(200%)', border: '1.5px solid rgba(255, 255, 255, 0.7)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8)' }}>
               
               <NavButton icon={<Home />} label="Ana Sayfa" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
               <NavButton icon={<Bell />} label="Bildirim" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} />
